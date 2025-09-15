@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Deteksi Keretakan Telur</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .canvas-container {
+            border: 1px solid #e2e8f0;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            background-color: #f8fafc;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <div class="bg-white rounded-xl shadow-lg p-6 md:p-8 max-w-7xl mx-auto">
+            
+            <header class="text-center mb-8">
+                <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Sistem Deteksi Keretakan Telur</h1>
+                <p class="mt-2 text-gray-600">Unggah gambar telur untuk menganalisis keretakan secara otomatis.</p>
+            </header>
+
+            <!-- Input Section -->
+            <div class="flex flex-col items-center justify-center mb-8">
+                <label for="fileInput" class="cursor-pointer bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition-colors duration-300 flex items-center gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    Pilih Gambar Telur
+                </label>
+                <input type="file" id="fileInput" class="hidden" accept="image/*">
+                <p id="fileName" class="mt-4 text-sm text-gray-500"></p>
+            </div>
+
+            <!-- Status and Loader -->
+            <div id="status" class="text-center my-6 hidden">
+                <div class="flex justify-center items-center gap-4">
+                    <div class="loader"></div>
+                    <span id="statusText" class="text-lg font-medium text-gray-700"></span>
+                </div>
+            </div>
+
+            <!-- Output Section -->
+            <div id="output" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 hidden">
+                <div class="canvas-container text-center p-2">
+                    <h3 class="font-semibold mb-2">1. Gambar Asli</h3>
+                    <canvas id="originalCanvas" class="w-full h-auto rounded-md"></canvas>
+                </div>
+                <div class="canvas-container text-center p-2">
+                    <h3 class="font-semibold mb-2">2. CLAHE</h3>
+                    <canvas id="claheCanvas" class="w-full h-auto rounded-md"></canvas>
+                </div>
+                <div class="canvas-container text-center p-2">
+                    <h3 class="font-semibold mb-2">3. Hapus Background</h3>
+                    <canvas id="removeBgCanvas" class="w-full h-auto rounded-md"></canvas>
+                </div>
+                <div class="canvas-container text-center p-2">
+                    <h3 class="font-semibold mb-2">4. Deteksi Tepi (Retakan)</h3>
+                    <canvas id="cannyCanvas" class="w-full h-auto rounded-md"></canvas>
+                </div>
+                <div class="canvas-container text-center p-2 border-2 border-blue-500">
+                    <h3 class="font-semibold mb-2 text-blue-600">5. Hasil Deteksi</h3>
+                    <canvas id="resultCanvas" class="w-full h-auto rounded-md"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    
+    <!-- OpenCV.js -->
+    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady();"></script>
+
+    <script type="text/javascript">
+        const fileInput = document.getElementById('fileInput');
+        const fileNameDisplay = document.getElementById('fileName');
+        const statusDiv = document.getElementById('status');
+        const statusText = document.getElementById('statusText');
+        const outputDiv = document.getElementById('output');
+
+        function onOpenCvReady() {
+            statusText.textContent = 'OpenCV.js berhasil dimuat. Silakan pilih gambar.';
+            statusDiv.classList.remove('hidden');
+            statusDiv.querySelector('.loader').classList.add('hidden');
+        }
+        
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            fileNameDisplay.textContent = file.name;
+            outputDiv.classList.add('hidden');
+            statusDiv.classList.remove('hidden');
+            statusDiv.querySelector('.loader').classList.remove('hidden');
+            statusText.textContent = 'Memproses gambar...';
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const imgElement = new Image();
+                imgElement.src = event.target.result;
+                imgElement.onload = () => processImage(imgElement);
+            };
+            reader.readAsDataURL(file);
+        });
+
+        function processImage(imgElement) {
+            try {
+                // 1. Load image and convert to grayscale
+                let src = cv.imread(imgElement);
+                let gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+                cv.imshow('originalCanvas', src);
+
+                // 2. Apply CLAHE
+                let clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
+                let clahe_dst = new cv.Mat();
+                clahe.apply(gray, clahe_dst);
+                cv.imshow('claheCanvas', clahe_dst);
+
+                // --- NEW METHOD: Use Canny edges to create a precise mask ---
+                // 3. Perform an initial Canny to find the egg's outline
+                let canny_for_mask = new cv.Mat();
+                cv.Canny(clahe_dst, canny_for_mask, 30, 90);
+
+                // 4. Dilate the outline to close potential small gaps
+                let morphKernel = cv.Mat.ones(5, 5, cv.CV_8U);
+                let dilated = new cv.Mat();
+                cv.dilate(canny_for_mask, dilated, morphKernel, new cv.Point(-1, -1), 1);
+
+                // 5. Find the largest contour from this solid outline
+                let mask_contours = new cv.MatVector();
+                let mask_hierarchy = new cv.Mat();
+                cv.findContours(dilated, mask_contours, mask_hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+                let maxArea = 0;
+                let maxContourIndex = -1;
+                for (let i = 0; i < mask_contours.size(); i++) {
+                    let area = cv.contourArea(mask_contours.get(i));
+                    if (area > maxArea) {
+                        maxArea = area;
+                        maxContourIndex = i;
+                    }
+                }
+
+                if (maxContourIndex === -1) {
+                    throw new Error("Tidak dapat menemukan outline telur pada gambar.");
+                }
+
+                let precise_egg_contour = mask_contours.get(maxContourIndex);
+
+                // 6. Create a mask by filling this precise contour
+                let fullMask = cv.Mat.zeros(gray.rows, gray.cols, cv.CV_8U);
+                let contourVector = new cv.MatVector();
+                contourVector.push_back(precise_egg_contour);
+                cv.drawContours(fullMask, contourVector, 0, new cv.Scalar(255), -1);
+
+                // 7. Apply the precise FULL-SIZE mask to the FULL-SIZE CLAHE image
+                let removed_bg = new cv.Mat();
+                clahe_dst.copyTo(removed_bg, fullMask); // Use fullMask here
+                cv.imshow('removeBgCanvas', removed_bg);
+
+                // 8. Apply Gaussian Blur and a SECOND Canny Edge Detection for crack detection
+                let blurred = new cv.Mat();
+                let canny_for_cracks = new cv.Mat();
+                cv.GaussianBlur(removed_bg, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+                // We use different thresholds here, more sensitive to find fine lines
+                cv.Canny(blurred, canny_for_cracks, 50, 150);
+                cv.imshow('cannyCanvas', canny_for_cracks);
+
+                // 9. Find contours (cracks) on the second Canny image and draw on the original color image
+                let crack_contours = new cv.MatVector();
+                let crack_hierarchy = new cv.Mat();
+                cv.findContours(canny_for_cracks, crack_contours, crack_hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+                let result = src.clone(); // Start with the full-size original image
+                let cracksFound = 0;
+
+                for (let i = 0; i < crack_contours.size(); ++i) {
+                    let cnt = crack_contours.get(i);
+                    let area = cv.contourArea(cnt);
+                    
+                    if (area < 20) { // Abaikan noise yang sangat kecil
+                        cnt.delete();
+                        continue;
+                    }
+
+                    let crackRect = cv.boundingRect(cnt);
+                    let aspectRatio = crackRect.width / (crackRect.height + 1e-5);
+
+                    // Kondisi 1: Bentuk panjang dan tipis (retakan biasa)
+                    let isCrackShape = area > 50 && (aspectRatio > 2.5 || aspectRatio < 0.4);
+                    
+                    // Kondisi 2: Bentuk kecil dan bundar (titik atau lubang kecil)
+                    let isDotShape = area >= 20 && area < 150 && aspectRatio > 0.7 && aspectRatio < 1.3;
+
+                    if (isCrackShape || isDotShape) {
+                         let point1 = new cv.Point(crackRect.x, crackRect.y);
+                         let point2 = new cv.Point(crackRect.x + crackRect.width, crackRect.y + crackRect.height);
+                         cv.rectangle(result, point1, point2, new cv.Scalar(255, 0, 0, 255), 2);
+                         cracksFound++;
+                    }
+                    cnt.delete();
+                }
+
+                // 10. Tambahkan caption pada gambar hasil
+                let captionText = cracksFound > 0 ? "Telur Retak" : "Telur Normal";
+                let captionColor = cracksFound > 0 ? new cv.Scalar(255, 0, 0, 255) : new cv.Scalar(0, 128, 0, 255); // Merah atau Hijau Tua
+
+                let fontScale = result.cols / 700; // Skala font dinamis berdasarkan lebar gambar
+                if (fontScale < 0.7) fontScale = 0.7;
+                let thickness = Math.max(2, Math.round(fontScale * 2));
+                
+                let textPosition = new cv.Point(15, 40); // Posisi di kiri atas
+                cv.putText(result, captionText, textPosition, cv.FONT_HERSHEY_SIMPLEX, fontScale, captionColor, thickness);
+
+                cv.imshow('resultCanvas', result);
+
+                // Clean up memory
+                src.delete(); gray.delete(); clahe.delete(); clahe_dst.delete();
+                canny_for_mask.delete(); morphKernel.delete(); dilated.delete();
+                mask_contours.delete(); mask_hierarchy.delete(); contourVector.delete();
+                fullMask.delete(); 
+                removed_bg.delete(); blurred.delete(); canny_for_cracks.delete();
+                crack_contours.delete(); crack_hierarchy.delete(); result.delete();
+
+                statusDiv.classList.add('hidden');
+                outputDiv.classList.remove('hidden');
+
+            } catch(err) {
+                console.error(err);
+                statusText.textContent = err.message || 'Terjadi kesalahan saat memproses gambar.';
+                statusDiv.querySelector('.loader').classList.add('hidden');
+            }
+        }
+
+        if (typeof cv === 'undefined') {
+            statusText.textContent = 'Memuat OpenCV.js...';
+            statusDiv.classList.remove('hidden');
+        } else {
+            onOpenCvReady();
+        }
+    </script>
+</body>
+</html>
+
